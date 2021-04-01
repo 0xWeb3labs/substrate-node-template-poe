@@ -4,7 +4,7 @@
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// https://substrate.dev/docs/en/knowledgebase/runtime/frame
 
-use frame_support::{decl_module, decl_storage, decl_event, decl_error, ensure, dispatch, traits::Get};
+use frame_support::{decl_module, decl_storage, decl_event, decl_error, ensure, dispatch};
 use frame_system::ensure_signed;
 use sp_std::prelude::*;
 
@@ -37,6 +37,7 @@ decl_event!(
 	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId {
 		ClaimCreated(AccountId, Vec<u8>),
 		ClaimRevoked(AccountId, Vec<u8>),
+		ClaimTransferred(AccountId, Vec<u8>),
 	}
 );
 
@@ -46,6 +47,7 @@ decl_error! {
 		ProofAlreadyClaimed,
 		NoSuchProof,
 		NotProofOwner,
+        OwnedClaimAlready,
 	}
 }
 
@@ -108,5 +110,36 @@ decl_module! {
 
 			Ok(())
         }
-	}
+
+        /// Allow the owner to transfer their claim.
+       #[weight = 10_000]
+       fn trans_claim(origin, proof: Vec<u8>) -> dispatch::DispatchResult {
+           // Check that the extrinsic was signed and get the signer.
+           // This function will return an error if the extrinsic is not signed.
+           // https://substrate.dev/docs/en/knowledgebase/runtime/origin
+           let receiver = ensure_signed(origin)?;
+
+           // Verify that the specified proof has been claimed.
+           ensure!(Proofs::<T>::contains_key(&proof), Error::<T>::NoSuchProof);
+
+           // Get owner of the claim.
+           let (owner, _block_number) = Proofs::<T>::get(&proof);
+
+           // Verify that receiver of the current call is not the claim owner.
+           ensure!(receiver != owner, Error::<T>::OwnedClaimAlready);
+
+           // Get the block number from the FRAME System module.
+           let current_block = <frame_system::Module<T>>::block_number();
+
+           // Remove claim from storage, then, add new claim to storage.
+           Proofs::<T>::remove(&proof);
+           Proofs::<T>::insert(&proof, (&receiver, current_block));
+
+           // Emit an event that the claim was erased.
+           Self::deposit_event(RawEvent::ClaimTransferred(receiver, proof));
+
+           Ok(())
+       }
+
+    }
 }
